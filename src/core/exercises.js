@@ -46,10 +46,11 @@ export const EXERCISES = [
       const flags = [];
       if (trunkTilt(lm) > 10) flags.push('trunk_lean');
       if (jointAngle(lm[s.shoulder], lm[s.elbow], lm[s.wrist]) < 145) flags.push('elbow_bent');
-      // Shoulder hiking: the working shoulder rises clearly above the other one.
+      // Shoulder hiking (shrugging to lift the arm). Above ~90° the shoulder girdle rises as part of
+      // normal scapulohumeral rhythm, so only an early shrug (arm still below 90°) is a compensation.
       const sh = lm[s.shoulder], sho = lm[LM[other(side)].shoulder];
       const shoulderWidth = Math.abs(sh.x - sho.x) || 1e-6;
-      if ((sho.y - sh.y) / shoulderWidth > 0.15) flags.push('shoulder_hike');
+      if (angle < 90 && (sho.y - sh.y) / shoulderWidth > 0.15) flags.push('shoulder_hike');
       return { angle, visibility: minVisibility(pts), flags };
     },
   },

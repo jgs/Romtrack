@@ -44,6 +44,14 @@ export class RepCounter {
     this._cur = null;
   }
 
+  /** Discard an unfinished repetition (e.g. tracking was lost mid-rep). Completed reps are kept. */
+  abort() {
+    this.state = 'rest';
+    this._restAnchor = null;
+    this._restMin = null;
+    this._cur = null;
+  }
+
   progress(angle) {
     return (angle - this.rest) / (this.target - this.rest);
   }

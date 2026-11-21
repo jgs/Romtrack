@@ -41,6 +41,9 @@ camera / video ──► MediaPipe Pose Landmarker (33 landmarks, on-device)
         └─ per-frame compensation checks
                     │
                     ▼
+        SignalGate (reset after tracking gaps, warm-up, drop single-frame glitches)
+                    │
+                    ▼
         One Euro filter (adaptive low-pass on the angle)
                     │
                     ▼
@@ -58,6 +61,8 @@ Design decisions:
 - **Progress normalisation.** Angles are mapped to `progress = (angle − rest) / (target − rest)`, so the same counter handles movements where the angle increases (abduction, knee extension) and decreases (elbow flexion, squat).
 - **Hysteresis instead of a single threshold.** A rep starts above 30 % and only closes below 15 %. Jitter around a threshold cannot produce double counts.
 - **One Euro filter** ([Casiez et al., CHI 2012](https://gery.casiez.net/1euro/)). It smooths heavily when the limb is still and adds little lag when it moves fast, which a fixed moving average can't do.
+- **Tracking gaps are not bridged.** First real-camera tests showed that when a person leaves and re-enters the frame, the first landmarks are often wrong and a stale filter turns them into a fake 178° "rep". After a gap > 400 ms the filter is reset, any open rep is discarded and a few warm-up frames are skipped; physically implausible jumps (> 900°/s) are dropped unless they persist.
+- **Shoulder hiking only counts below 90°.** Above that, the shoulder girdle rises as part of normal scapulohumeral rhythm; flagging it there was a false positive in real tests.
 - **ROM from the most rested angle** of each rest phase, not from the band edge, so ROM isn't underestimated.
 - **Pure core, thin UI.** Everything in `src/core/` is DOM-free and unit-tested in Node; the browser layer only wires camera, model and rendering.
 
@@ -103,7 +108,7 @@ npm start            # or: python3 -m http.server 8000
 Camera access requires `localhost` or HTTPS.
 
 ```bash
-npm test             # 15 unit tests (Node ≥ 18, built-in test runner)
+npm test             # 20 unit tests (Node ≥ 18, built-in test runner)
 npm run bench        # synthetic benchmark table above
 ```
 
@@ -119,6 +124,7 @@ src/core/geometry.js  joint angles, trunk tilt
 src/core/oneEuro.js   One Euro filter
 src/core/repCounter.js  hysteresis repetition counter
 src/core/exercises.js exercise catalogue + compensation checks
+src/core/signalGate.js  gap / glitch handling before filtering
 src/core/session.js   summary statistics, CSV, downsampling
 test/                 unit tests + synthetic trajectory generator
 scripts/benchmark.js  counting benchmark

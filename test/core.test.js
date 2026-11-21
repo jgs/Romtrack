@@ -5,6 +5,7 @@ import { jointAngle, tiltFromVertical } from '../src/core/geometry.js';
 import { OneEuroFilter } from '../src/core/oneEuro.js';
 import { RepCounter, RepQuality } from '../src/core/repCounter.js';
 import { EXERCISES, getExercise, autoSide } from '../src/core/exercises.js';
+import { SignalGate } from '../src/core/signalGate.js';
 import { summarize, repsToCsv, downsample } from '../src/core/session.js';
 import { generateSet } from './synth.js';
 
@@ -158,3 +159,62 @@ function neutralPose() {
   });
   return lm;
 }
+
+test('SignalGate: warm-up, gap reset and single-frame glitch rejection', () => {
+  const g = new SignalGate({ warmupFrames: 2 });
+  assert.equal(g.push(20, 0).use, false); // warm-up
+  assert.equal(g.push(20, 33).use, false); // warm-up
+  assert.equal(g.push(22, 66).use, true);
+  assert.equal(g.push(170, 99).use, false); // 148° in 33 ms: glitch
+  assert.equal(g.push(24, 132).use, true); // back to normal
+  const r = g.push(30, 1000); // 868 ms gap
+  assert.equal(r.reset, true);
+  assert.equal(r.use, false); // warm-up again
+  assert.equal(g.push(NaN, 1033).use, false);
+});
+
+test('SignalGate accepts a jump that persists (real fast motion)', () => {
+  const g = new SignalGate({ warmupFrames: 0, maxConsecutiveRejects: 2 });
+  g.push(20, 0);
+  assert.equal(g.push(120, 33).use, false);
+  assert.equal(g.push(121, 66).use, false);
+  assert.equal(g.push(122, 99).use, true); // persisted for 3 frames: accepted as real motion
+});
+
+test('re-acquired tracking cannot create a fake rep (real-session regression)', () => {
+  const gate = new SignalGate();
+  const f = new OneEuroFilter();
+  const c = new RepCounter({ rest: 15, target: 150 });
+  const feed = (a, t) => {
+    const g = gate.push(a, t);
+    if (g.reset) { f.reset(); c.abort(); }
+    if (g.use) c.update(f.filter(a, t), t);
+  };
+  let t = 0;
+  for (let i = 0; i < 30; i++) feed(20, (t += 33)); // resting
+  t += 20000; // person leaves the frame for 20 s
+  feed(178, t); feed(175, (t += 33)); feed(20, (t += 33)); // garbage frames on re-entry
+  for (let i = 0; i < 30; i++) feed(20, (t += 33));
+  assert.equal(c.reps.length, 0);
+});
+
+test('RepCounter.abort discards an open rep but keeps finished ones', () => {
+  const c = new RepCounter({ rest: 0, target: 100 });
+  let t = 0;
+  for (const a of [0, 50, 100, 50, 0]) c.update(a, (t += 300));
+  for (const a of [0, 60, 90]) c.update(a, (t += 300));
+  c.abort();
+  for (const a of [20, 0]) c.update(a, (t += 300));
+  assert.equal(c.reps.length, 1);
+});
+
+test('shoulder hike is only a compensation below 90°', () => {
+  const lm = neutralPose();
+  lm[23] = { x: 0.6, y: 0.6, visibility: 1 };
+  lm[11] = { x: 0.6, y: 0.25, visibility: 1 }; // working shoulder clearly higher than the other
+  const ex = getExercise('shoulder_abduction');
+  assert.ok(ex.measure(lm, 'left').flags.includes('shoulder_hike')); // arm down + shrug
+  lm[13] = { x: 0.6, y: 0.1, visibility: 1 }; // arm overhead
+  lm[15] = { x: 0.6, y: 0.0, visibility: 1 };
+  assert.ok(!ex.measure(lm, 'left').flags.includes('shoulder_hike'));
+});

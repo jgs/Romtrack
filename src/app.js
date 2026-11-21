@@ -3,6 +3,7 @@
 import { EXERCISES, getExercise, autoSide, LM } from './core/exercises.js';
 import { OneEuroFilter } from './core/oneEuro.js';
 import { RepCounter } from './core/repCounter.js';
+import { SignalGate } from './core/signalGate.js';
 import { summarize, downsample } from './core/session.js';
 import { t, setLang, getLang, applyI18n } from './i18n.js';
 import { renderReport, exportCsv, exportJson, saveToHistory, renderHistory, clearHistory, drawChart } from './report.js';
@@ -42,6 +43,7 @@ const state = {
   side: null,
   sideVotes: { left: 0, right: 0 },
   filter: new OneEuroFilter({ minCutoff: 1.0, beta: 0.02 }),
+  gate: new SignalGate(),
   counter: null,
   trace: [],
   t0: 0,
@@ -224,6 +226,7 @@ async function start() {
     startedAt: Date.now(),
   });
   state.filter.reset();
+  state.gate.reset();
   state.flagStreak.clear();
   els.placeholder.hidden = true;
   els.startBtn.hidden = true;
@@ -321,6 +324,18 @@ function processFrame() {
   if (m.visibility < MIN_VISIBILITY || !Number.isFinite(m.angle)) {
     state.trace.push({ t: tMs, angle: NaN });
     showFeedback(t('low_visibility'), 'warn', 400);
+    updateHud(NaN);
+    return;
+  }
+
+  const g = state.gate.push(m.angle, tMs);
+  if (g.reset) {
+    // Tracking came back after a gap: start clean instead of bridging the gap.
+    state.filter.reset();
+    state.counter.abort();
+  }
+  if (!g.use) {
+    state.trace.push({ t: tMs, angle: NaN });
     updateHud(NaN);
     return;
   }
